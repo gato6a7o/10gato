@@ -1,6 +1,6 @@
 """Motor de 10gato: analizar y preparar clips sin depender de una interfaz"""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from decimal import Decimal, InvalidOperation
 from fractions import Fraction
 from pathlib import Path
@@ -16,12 +16,16 @@ MAX_BYTES = 10_000_000
 TARGET_BYTES = 9_800_000
 LONG_CLIP_SECONDS = Decimal(120)
 INITIAL_AUDIO_BITRATE = 96_000
+MAX_SIZE_RETRIES = 2
 
 class CompressionError(Exception):
     """Informar un motivo que pueda mostrarse directamente al usuario."""
 
 class CompressionCancelled(CompressionError):
     """Indicar una cancelacion sin tratarla como una conversion terminada."""
+
+class SizeLimitExceeded(CompressionError):
+    """Distinguir un exceso de tamano de los fallos que no deben reintentarse."""
 
 @dataclass(frozen=True)
 class AudioTrack:
@@ -186,6 +190,19 @@ def resolve_tool(value: str | None, name: str) -> str:
         raise CompressionError(f"No se encontró {name}. Indica su ruta con --{name}.")
     return executable
 
+def make_retry_plan(media: MediaInfo, plan: CompressionPlan, actual_size: int) -> CompressionPlan:
+    # Reducir el presupuesto cuando una salida completa supera el limite
+    # Usa el tamano medido y los ajustes anteriores, conservando las pistas elegidas
+    if plan.mode == "copy_video":
+        # Forzar un presupuesto de imagen si preparar solo el audio ya no permite que el clip quepa
+        plan = make_plan(replace(media, size=MAX_BYTES + 1), plan.audio_tracks)
+    total_bitrate = (plan.video_bitrate + plan.audio_bitrate) * TARGET_BYTES // actual_size
+    audio_bitrate = min(plan.audio_bitrate, total_bitrate // 4) if plan.audio_tracks else 0
+    video_bitrate = total_bitrate - audio_bitrate
+    if video_bitrate < 1 or (plan.audio_tracks and audio_bitrate < 1):
+        raise CompressionError("El reintento no permite expresar un bitrate positivo para el codificador.")
+    return replace(plan, video_bitrate=video_bitrate, audio_bitrate=audio_bitrate)
+
 def run_tool(arguments: list[str]) -> str:
     # Ejecutar una herramienta al analizar, convertir o verificar el clip
     # Recibe el ejecutable y sus argumentos por separado, sin pasar por una consola
@@ -246,9 +263,6 @@ def read_span(path: Path, stream_index: int, ffprobe: str) -> TimeSpan:
 def verify_output(media: MediaInfo, plan: CompressionPlan, output: Path, ffprobe: str) -> None:
     # Verificar la copia temporal despues de convertir y antes de guardarla
     # Compara su tamano y sus pistas con el original y los ajustes previstos
-    if output.stat().st_size > MAX_BYTES:
-        raise CompressionError("El resultado supera 10.000.000 bytes. No se guardó ninguna copia. "
-                                "Los reintentos automáticos estarán disponibles en el siguiente hito.")
     result = inspect_media(output, ffprobe)
     if result.video_codec != "h264" or len(result.audio) != bool(plan.audio_tracks):
         raise CompressionError("El resultado no contiene las pistas de video y audio esperadas.")
@@ -273,6 +287,8 @@ def verify_output(media: MediaInfo, plan: CompressionPlan, output: Path, ffprobe
                             max(span.end for span in originals) - media.origin)
         if abs(expected.start - output_audio.start) > tolerance or abs(expected.end - output_audio.end) > tolerance:
             raise CompressionError("El audio está incompleto o desplazado. No se guardó la copia.")
+    if result.size > MAX_BYTES:
+        raise SizeLimitExceeded(f"El resultado ocupa {result.size:,} bytes y supera el límite de 10.000.000 bytes.")
 
 def audio_arguments(media: MediaInfo, plan: CompressionPlan, ffprobe: str) -> list[str]:
     # Preparar las opciones de audio antes de ejecutar la conversion
@@ -334,25 +350,43 @@ def compress_clip(media: MediaInfo, plan: CompressionPlan, ffmpeg: str, ffprobe:
         raise CompressionCancelled("Conversión cancelada. Puedes elegir otro clip.")
 
     common = [ffmpeg, "-v", "error", "-nostdin", "-n", "-copyts", "-start_at_zero", "-i", str(media.path)]
-    audio = audio_arguments(media, plan, ffprobe)
     with tempfile.TemporaryDirectory(prefix=".10gato-", dir=media.path.parent) as directory:
-        working = Path(directory)
-        output = working / "pending.mp4"
-        if plan.mode == "copy_video":
-            report("Preparando el audio y copiando el video sin recodificar…")
-            run_tool([*common, "-map", f"0:{media.video_index}", "-c:v", "copy", *audio,
-                        "-map_metadata", "-1", "-movflags", "+faststart", str(output)])
-        else:
-            video = ["-map", f"0:{media.video_index}", "-vf",
-                        f"scale={plan.width}:{plan.height}:flags=lanczos,setsar=1,fps={plan.fps}",
-                        "-c:v", "libx264", "-preset", "slow", "-b:v", str(plan.video_bitrate),
-                        "-pix_fmt", "yuv420p", "-fps_mode", "cfr", "-passlogfile", str(working / "x264")]
-            report("Comprimiendo video: pasada 1 de 2…")
-            run_tool([*common, *video, "-pass", "1", "-an", "-f", "null", os.devnull])
-            report("Comprimiendo video: pasada 2 de 2…")
-            run_tool([*common, *video, "-pass", "2", *audio, "-map_metadata", "-1",
-                        "-movflags", "+faststart", str(output)])
-        report("Verificando el tamaño y las pistas completas de video y audio…")
-        verify_output(media, plan, output, ffprobe)
-        destination = publish_output(output, media.path)
-    return CompressionResult(destination, False)
+        for attempt in range(MAX_SIZE_RETRIES + 1):
+            # Separar los archivos de cada intento para no reutilizar salidas ni estadisticas de x264
+            working = Path(directory) / str(attempt)
+            working.mkdir()
+            output = working / "pending.mp4"
+            audio = audio_arguments(media, plan, ffprobe)
+            if plan.mode == "copy_video":
+                report("Preparando el audio y copiando el video sin recodificar…")
+                run_tool([*common, "-map", f"0:{media.video_index}", "-c:v", "copy", *audio,
+                            "-map_metadata", "-1", "-movflags", "+faststart", str(output)])
+            else:
+                video = ["-map", f"0:{media.video_index}", "-vf",
+                            f"scale={plan.width}:{plan.height}:flags=lanczos,setsar=1,fps={plan.fps}",
+                            "-c:v", "libx264", "-preset", "slow", "-b:v", str(plan.video_bitrate),
+                            "-pix_fmt", "yuv420p", "-fps_mode", "cfr", "-passlogfile", str(working / "x264")]
+                report("Comprimiendo video: pasada 1 de 2…")
+                run_tool([*common, *video, "-pass", "1", "-an", "-f", "null", os.devnull])
+                report("Comprimiendo video: pasada 2 de 2…")
+                run_tool([*common, *video, "-pass", "2", *audio, "-map_metadata", "-1",
+                            "-movflags", "+faststart", str(output)])
+            report("Verificando el tamaño y las pistas completas de video y audio…")
+            try:
+                verify_output(media, plan, output, ffprobe)
+            except SizeLimitExceeded as error:
+                if attempt == MAX_SIZE_RETRIES:
+                    raise CompressionError(f"{error} Se agotaron los {MAX_SIZE_RETRIES} reintentos. "
+                                            "No se guardó ninguna copia.") from error
+                next_plan = make_retry_plan(media, plan, output.stat().st_size)
+                if plan.mode == "copy_video":
+                    report("Preparar solo el audio supera el límite; hace falta comprimir también la imagen.")
+                    if next_plan.needs_warning and (confirm_long is None or not confirm_long()):
+                        raise CompressionCancelled("Conversión cancelada. Puedes elegir otro clip.")
+                plan = next_plan
+                report(f"Reintento {attempt + 1} de {MAX_SIZE_RETRIES}: {output.stat().st_size:,} bytes. "
+                        f"Video: {plan.video_bitrate} b/s · Audio: {plan.audio_bitrate} b/s · "
+                        f"{plan.width}×{plan.height} · FPS: {plan.fps}")
+                continue
+            destination = publish_output(output, media.path)
+            return CompressionResult(destination, False)
