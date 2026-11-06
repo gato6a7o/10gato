@@ -1,6 +1,8 @@
 """Motor de 10gato: analizar y preparar clips sin depender de una interfaz"""
 
 from dataclasses import dataclass, replace
+from contextlib import contextmanager
+from contextvars import ContextVar
 from decimal import Decimal, InvalidOperation
 from fractions import Fraction
 from pathlib import Path
@@ -17,6 +19,7 @@ TARGET_BYTES = 9_800_000
 LONG_CLIP_SECONDS = Decimal(120)
 INITIAL_AUDIO_BITRATE = 96_000
 MAX_SIZE_RETRIES = 2
+_cancellation_check = ContextVar("ten_gato_cancellation", default=None)
 
 class CompressionError(Exception):
     """Informar un motivo que pueda mostrarse directamente al usuario."""
@@ -203,16 +206,42 @@ def make_retry_plan(media: MediaInfo, plan: CompressionPlan, actual_size: int) -
         raise CompressionError("El reintento no permite expresar un bitrate positivo para el codificador.")
     return replace(plan, video_bitrate=video_bitrate, audio_bitrate=audio_bitrate)
 
+@contextmanager
+def cancellable_operation(cancelled: Callable[[], bool]):
+    # Asociar una cancelacion al trabajo que comienza en este hilo
+    # Restaurar el contexto al terminar para no afectar otras conversiones ni la consola
+    token = _cancellation_check.set(cancelled)
+    try:
+        check_cancelled()
+        yield
+    finally:
+        _cancellation_check.reset(token)
+
+def check_cancelled() -> None:
+    # Interrumpir el trabajo en los puntos donde se puede salir sin entregar una copia
+    # Consultar la funcion del contexto actual si la interfaz habilito cancelacion
+    cancelled = _cancellation_check.get()
+    if cancelled is not None and cancelled():
+        raise CompressionCancelled("Conversión cancelada. Se han limpiado los temporales.")
+
 def run_tool(arguments: list[str]) -> str:
     # Ejecutar una herramienta al analizar, convertir o verificar el clip
     # Recibe el ejecutable y sus argumentos por separado, sin pasar por una consola
+    check_cancelled()
     try:
         with subprocess.Popen(arguments, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                                 stderr=subprocess.PIPE,
                                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)) as process:
             try:
-                output, errors = process.communicate()
-            except KeyboardInterrupt as error:
+                while True:
+                    check_cancelled()
+                    try:
+                        output, errors = process.communicate(timeout=0.1)
+                        break
+                    except subprocess.TimeoutExpired:
+                        continue
+                check_cancelled()
+            except (KeyboardInterrupt, CompressionCancelled) as error:
                 process.kill()
                 process.communicate()
                 raise CompressionCancelled("Conversión cancelada. Se han limpiado los temporales.") from error
@@ -313,6 +342,7 @@ def audio_arguments(media: MediaInfo, plan: CompressionPlan, ffprobe: str) -> li
 def publish_output(temporary: Path, source: Path) -> Path:
     # Guardar la copia al superar la verificacion, sin reemplazar archivos existentes
     # Usa un archivo nuevo junto al original para heredar los permisos de esa carpeta
+    check_cancelled()
     staging = source.parent / f".10gato-{uuid.uuid4().hex}.mp4"
     staging_created = False
     try:
@@ -323,6 +353,7 @@ def publish_output(temporary: Path, source: Path) -> Path:
                 shutil.copyfileobj(incoming, outgoing)
         sequence = 1
         while True:
+            check_cancelled()
             suffix = "" if sequence == 1 else f"_{sequence}"
             destination = source.with_name(f"{source.stem}_10MB{suffix}.mp4")
             try:
