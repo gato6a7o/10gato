@@ -22,8 +22,9 @@ import compressor
 
 LONG_WARNING = ("Este clip dura más de 2 minutos. Para que el video completo quepa en 10 MB, "
                 "puede perder bastante detalle")
-LOGO = Path(__file__).with_name("Julin_.png")
-HEADER_MASCOT = Path(__file__).with_name("julin_(1).png")
+ASSETS = Path(__file__).resolve().parent / "assets"
+LOGO = ASSETS / "Julin_.png"
+HEADER_MASCOT = ASSETS / "julin_(1).png"
 FONT_SETTING = "appearance/fontSize"
 DEFAULT_FONT_SIZE = 12
 MIN_FONT_SIZE = 10
