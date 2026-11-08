@@ -2,6 +2,8 @@
 
 Programa para reducir automáticamente videos cortos a 10 MB y poder compartirlos en Discord (basura de límite de 10 MB...)
 
+![Captura de la ventana de 10gato](assets/10gato.jpg)
+
 ## Descargar y abrir
 
 1. Entra en la sección [**Releases**](../../releases) de este repositorio y descarga el ZIP de la versión más reciente.
