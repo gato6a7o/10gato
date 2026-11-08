@@ -26,6 +26,6 @@ La copia se guarda en la misma carpeta que el original, con un nombre como `mi_v
 
 ## Licencia
 
-El código propio de **10gato**, con derechos de autor de `gato6a7o`, se distribuye bajo la GNU GPL versión 3 o cualquier versión posterior. Consulta el archivo `LICENSE`.
+El código propio de **10gato**, con derechos de autor de `gato6a7o`, se distribuye bajo la GNU GPL versión 3 o cualquier versión posterior. Consulta el archivo [`LICENSE`](LICENSE).
 
 Las imágenes de `assets/` son de `gato6a7o` y no están cubiertas por esa licencia. Se permite usarlas solo dentro de las distribuciones oficiales de **10gato**. Para distribuir una versión modificada, reemplaza esas imágenes o pide permiso para conservarlas.
