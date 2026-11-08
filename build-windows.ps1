@@ -61,9 +61,10 @@ $logo = Join-Path $assetsDir 'Julin_.png'
 $mascot = Join-Path $assetsDir 'julin_(1).png'
 $icon = Join-Path $assetsDir '10gato.ico'
 $entryPoint = Join-Path $PSScriptRoot 'gui.py'
+$projectLicense = Join-Path $PSScriptRoot 'LICENSE'
 $ffmpegLicense = Join-Path $ffmpegDir 'LICENSE'
 $ffmpegReadme = Join-Path $ffmpegDir 'README.txt'
-foreach ($file in @($entryPoint, $logo, $mascot, $pythonLicense, $ffmpegLicense, $ffmpegReadme)) {
+foreach ($file in @($entryPoint, $logo, $mascot, $projectLicense, $pythonLicense, $ffmpegLicense, $ffmpegReadme)) {
     if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { throw "Falta $file" }
 }
 foreach ($name in $ffmpegHashes.Keys) {
@@ -165,6 +166,7 @@ with Path(sys.argv[2]).open("xb") as icon_file:
     Copy-Item -LiteralPath $ffmpegLicense -Destination (Join-Path $licenses 'FFmpeg-GPL-3.0.txt')
     Copy-Item -LiteralPath $ffmpegReadme -Destination (Join-Path $licenses 'FFmpeg-build.txt')
     Copy-Item -LiteralPath $lgplLicense -Destination $licenses
+    Copy-Item -LiteralPath $projectLicense -Destination (Join-Path $licenses '10gato-GPL-3.0.txt')
     Copy-Item -LiteralPath $pythonLicense -Destination (Join-Path $licenses 'Python-LICENSE.txt')
     $pyinstallerLicense = Join-Path $venv 'Lib\site-packages\pyinstaller-6.22.3.dist-info\licenses\COPYING.txt'
     Copy-Item -LiteralPath $pyinstallerLicense -Destination (Join-Path $licenses 'PyInstaller-COPYING.txt')
@@ -174,6 +176,14 @@ with Path(sys.argv[2]).open("xb") as icon_file:
 Extrae toda la carpeta y abre 10gato.exe. Mantener juntas las carpetas bin e _internal.
 Selecciona o arrastra un clip. Si hay varias pistas de audio, elige la pista o mezcla.
 El resultado verificado se guarda junto al original, con un nombre disponible.
+
+Codigo propio de 10gato: copyright 2026 gato6a7o, GNU GPL version 3 o posterior.
+Texto de la licencia: licenses/10gato-GPL-3.0.txt.
+Codigo fuente: https://github.com/gato6a7o/10gato
+
+Las imagenes de _internal/assets/ son de gato6a7o y no estan cubiertas por la GPL.
+Se permite usarlas solo dentro de las distribuciones oficiales de 10gato.
+Para distribuir una version modificada, sustituirlas o pedir permiso para conservarlas.
 
 FFmpeg y ffprobe 9.0.2 essentials de Gyan, GPLv3:
 https://github.com/GyanD/codexffmpeg/releases/tag/9.0.2

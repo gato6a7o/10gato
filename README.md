@@ -4,9 +4,9 @@ Programa para reducir automáticamente videos cortos a 10 MB y poder compartirlo
 
 ## Descargar y abrir
 
-1. Entra en la sección **Releases** de este repositorio y descarga el ZIP de la versión más reciente.
+1. Entra en la sección [**Releases**](../../releases) de este repositorio y descarga el ZIP de la versión más reciente.
 2. Haz clic derecho sobre el ZIP y selecciona **Extraer todo**.
-3. Abre la carpeta extraída y ejecuta **10gato.exe**.
+3. Abre la carpeta extraída y ejecuta `10gato.exe`.
 
 No requiere instalación ni descargar programas adicionales.
 
@@ -23,3 +23,9 @@ La copia se guarda en la misma carpeta que el original, con un nombre como `mi_v
 
 - La calidad de imagen puede reducirse para cumplir el límite de tamaño, especialmente en videos largos.
 - El archivo original no se modifica.
+
+## Licencia
+
+El código propio de **10gato**, con derechos de autor de `gato6a7o`, se distribuye bajo la GNU GPL versión 3 o cualquier versión posterior. Consulta el archivo `LICENSE`.
+
+Las imágenes de `assets/` son de `gato6a7o` y no están cubiertas por esa licencia. Se permite usarlas solo dentro de las distribuciones oficiales de **10gato**. Para distribuir una versión modificada, reemplaza esas imágenes o pide permiso para conservarlas.
